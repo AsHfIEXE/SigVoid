@@ -1,18 +1,25 @@
 # SigVoid
 
 ```
-   ███████╗██╗ ██████╗ ██╗   ██╗ ██████╗ ██╗██████╗ 
-   ██╔════╝██║██╔════█╗██║   ██║██╔═══██╗██║███═██ 
-   ███████╗██║██║ ███╗██║   ██║██║   ██║██║██║ ██  
-   ╚═════██║██║██║   ██║██╗ ██╔╝██║   ██║██║██║  ██║
-   ███████║██║╚██████╗╚████╔╝ ╚██████╔╝██║██████╔╝ 
-   ╚══════╝╚═╝ ╚═════╝  ╚═══╝   ╚═════╝ ╚═╝═══════╝ 
+███████╗██╗ ██████╗ ██╗   ██╗ ██████╗ ██╗██████╗ 
+██╔════╝██║██╔════╝ ██║   ██║██╔═══██╗██║██╔══██╗
+███████╗██║██║  ███╗██║   ██║██║   ██║██║██║  ██║
+╚════██║██║██║   ██║╚██╗ ██╔╝██║   ██║██║██║  ██║
+███████║██║╚██████╔╝ ╚████╔╝ ╚██████╔╝██║██████╔╝
+╚══════╝╚═╝ ╚═════╝   ╚═══╝   ╚═════╝ ╚═╝╚═════╝
    SigVoid - Cyberacore Wi-Fi Threat Monitor
 ```
 
 **SigVoid**: A Cyberacore Wi-Fi threat monitor using a single ESP8266 to detect rogue APs, evil twins, and deauth attacks. Features a neon-green PWA dashboard with real-time analytics and auto-installs via `run.sh`.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT) ![GitHub Actions](https://github.com/AsHfIEXE/SigVoid/workflows/SigVoid%20CI/badge.svg)
+[![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+[![CI/CD](https://github.com/AsHfIEXE/SigVoid/workflows/SigVoid%20CI/badge.svg)](https://github.com/AsHfIEXE/SigVoid/actions)
+[![GitHub Stars](https://img.shields.io/github/stars/AsHfIEXE/SigVoid?style=social)](https://github.com/AsHfIEXE/SigVoid/stargazers)
+[![Python Version](https://img.shields.io/badge/Python-3.10-blue.svg)](https://www.python.org/downloads/release/python-3100/)
+[![ESP8266](https://img.shields.io/badge/ESP8266-NodeMCU-orange.svg)](https://github.com/esp8266/Arduino)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115.0-teal.svg)](https://fastapi.tiangolo.com/)
+[![TailwindCSS](https://img.shields.io/badge/TailwindCSS-3.4.2-blue.svg)](https://tailwindcss.com/)
+[![Chart.js](https://img.shields.io/badge/Chart.js-4.4.0-blue.svg)](https://www.chartjs.org/)
 
 ## Overview
 
