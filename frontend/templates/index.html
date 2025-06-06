@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SigVoid Dashboard</title>
+    <link href="/static/styles.css" rel="stylesheet">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#111827">
+    <script src="/static/chart.min.js"></script>
+    <script src="/static/alpine.min.js" defer></script>
+    <script src="/static/socket.io.min.js"></script>
+</head>
+<body class="bg-gray-900 text-white font-mono">
+    <div class="container mx-auto p-6" x-data="{ devices: {}, diagnostics: {}, selectedMac: null }">
+        <h1 class="text-4xl font-bold mb-6 text-neon-green">SigVoid</h1>
+
+        <!-- Controls -->
+        <div class="mb-6 flex flex-wrap space-x-4">
+            <button @click="fetch('/export/csv?min_score=0.5').then(() => alert('Exported high-risk to CSV'))" class="bg-neon-green text-gray-900 px-4 py-2 rounded hover:bg-green-400">Export High-Risk CSV</button>
+            <button @click="fetch('/export/json').then(() => alert('Exported to JSON'))" class="bg-neon-green text-gray-900 px-4 py-2 rounded hover:bg-green-400">Export JSON</button>
+            <button @click="fetch('/cleanup').then(res => res.json()).then(data => alert(data.status))" class="bg-neon-green text-gray-900 px-4 py-2 rounded hover:bg-green-400">Cleanup Logs</button>
+            <button @click="fetch('/diagnostics').then(res => res.json()).then(data => diagnostics = data)" class="bg-neon-green text-gray-900 px-4 py-2 rounded hover:bg-green-400">Refresh Diagnostics</button>
+        </div>
+
+        <!-- Diagnostics Panel -->
+        <div class="bg-gray-800 rounded-lg shadow-lg p-4 mb-6">
+            <h2 class="text-2xl mb-4">ESP8266 Diagnostics</h2>
+            <p><strong>Free Heap:</strong> <span x-text="diagnostics.free_heap || 'N/A'"></span> bytes</p>
+            <p><strong>Uptime:</strong> <span x-text="diagnostics.uptime ? diagnostics.uptime.toFixed(2) : 'N/A'"></span> seconds</p>
+        </div>
+
+        <!-- Device Table -->
+        <div class="bg-gray-800 rounded-lg shadow-lg p-4 mb-6">
+            <h2 class="text-2xl mb-4">Devices</h2>
+            <table class="w-full">
+                <thead>
+                    <tr class="bg-gray-700">
+                        <th class="p-3">MAC</th>
+                        <th class="p-3">Vendor</th>
+                        <th class="p-3">SSIDs</th>
+                        <th class="p-3">RSSI</th>
+                        <th class="p-3">Anomaly</th>
+                        <th class="p-3">Persistence</th>
+                        <th class="p-3">Pattern</th>
+                        <th class="p-3">Deauths</th>
+                        <th class="p-3">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="(device, mac) in devices" :key="mac">
+                        <tr :class="device.anomaly_score > 0.8 ? 'bg-red-900' : ''">
+                            <td class="p-3" x-text="mac"></td>
+                            <td class="p-3" x-text="device.vendor"></td>
+                            <td class="p-3" x-text="device.ssid_list.join(', ')"></td>
+                            <td class="p-3" x-text="device.rssi_list[device.rssi_list.length - 1] || 'N/A'"></td>
+                            <td class="p-3" :class="device.anomaly_score > 0.8 ? 'text-red-500' : 'text-green-400'" x-text="device.anomaly_score.toFixed(2)"></td>
+                            <td class="p-3" x-text="device.persistence_score.toFixed(2)"></td>
+                            <td class="p-3" x-text="device.pattern_score.toFixed(2)"></td>
+                            <td class="p-3" :class="device.deauth_count > 5 ? 'text-red-500' : ''" x-text="device.deauth_count"></td>
+                            <td class="p-3">
+                                <button @click="selectedMac = mac" class="text-neon-green hover:underline">Details</button>
+                                <button @click="fetch('/ban/' + mac).then(() => alert('Banned ' + mac))" class="text-neon-green hover:underline ml-2">Ban</button>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Device Details Modal -->
+        <div x-show="selectedMac" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+            <div class="bg-gray-800 p-6 rounded-lg max-w-lg w-full">
+                <h3 class="text-2xl mb-4">Device Details</h3>
+                <p><strong>MAC:</strong> <span x-text="selectedMac"></span></p>
+                <p><strong>Vendor:</strong> <span x-text="devices[selectedMac]?.vendor"></span></p>
+                <p><strong>SSIDs:</strong> <span x-text="devices[selectedMac]?.ssid_list.join(', ')"></span></p>
+                <p><strong>Anomaly Score:</strong> <span x-text="devices[selectedMac]?.anomaly_score.toFixed(2)"></span></p>
+                <p><strong>Persistence:</strong> <span x-text="devices[selectedMac]?.persistence_score.toFixed(2)"></span></p>
+                <p><strong>Pattern Score:</strong> <span x-text="devices[selectedMac]?.pattern_score.toFixed(2)"></span></p>
+                <p><strong>Channels:</strong> <span x-text="Object.keys(devices[selectedMac]?.channel_counts || {}).join(', ')"></span></p>
+                <button @click="selectedMac = null" class="bg-neon-green text-gray-900 px-4 py-2 mt-4 rounded">Close</button>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="bg-gray-800 rounded-lg shadow-lg p-4">
+                <h2 class="text-2xl mb-4">Signal Strength</h2>
+                <canvas id="signal-chart"></canvas>
+            </div>
+            <div class="bg-gray-800 rounded-lg shadow-lg p-4">
+                <h2 class="text-2xl mb-4">SSID Distribution</h2>
+                <canvas id="ssid-chart"></canvas>
+            </div>
+            <div class="bg-gray-800 rounded-lg shadow-lg p-4">
+                <h2 class="text-2xl mb-4">Persistence Timeline</h2>
+                <canvas id="persistence-chart"></canvas>
+            </div>
+            <div class="bg-gray-800 rounded-lg shadow-lg p-4">
+                <h2 class="text-2xl mb-4">Channel Activity</h2>
+                <canvas id="channel-chart"></canvas>
+         <!DOCTYPE html>
+<html lang="en" x-data="{ theme: localStorage.getItem('theme') || 'dark', sidebarOpen: false }">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SigVoid Dashboard</title>
+    <link href="/static/styles.css" rel="stylesheet">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#111827">
+    <script src="/static/chart.min.js"></script>
+    <script src="/static/alpine.min.js" defer></script>
+    <script src="/static/socket.io.min.js"></script>
+    <script src="/static/interact.min.js"></script>
+</head>
+<body :class="theme === 'dark' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-900'" class="font-mono transition-colors duration-300">
+    <!-- Sidebar -->
+    <div x-show="sidebarOpen" class="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden" @click="sidebarOpen = false"></div>
+    <div :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'" class="fixed inset-y-0 left-0 w-64 bg-gray-800 shadow-lg transform transition-transform duration-300 z-50 lg:translate-x-0">
+        <div class="p-4">
+            <h2 class="text-2xl font-bold text-neon-green">SigVoid</h2>
+            <nav class="mt-6">
+                <a href="#devices" class="block py-2 px-4 text-gray-300 hover:bg-gray-700 rounded" @click="sidebarOpen = false">Devices</a>
+                <a href="#diagnostics" class="block py-2 px-4 text-gray-300 hover:bg-gray-700 rounded" @click="sidebarOpen = false">Diagnostics</a>
+                <a href="#settings" class="block py-2 px-4 text-gray-300 hover:bg-gray-700 rounded" @click="sidebarOpen = false">Settings</a>
+            </nav>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="lg:ml-64 p-6">
+        <div class="flex justify-between items-center mb-6">
+            <button class="lg:hidden text-neon-green text-2xl" @click="sidebarOpen = true">☰</button>
+            <h1 class="text-4xl font-bold text-neon-green">SigVoid</h1>
+            <button @click="theme = theme === 'dark' ? 'light' : 'dark'; localStorage.setItem('theme', theme)" class="text-neon-green hover:text-green-400" aria-label="Toggle theme">
+                <span x-show="theme === 'dark'">🌙</span>
+                <span x-show="theme === 'light'">☀️</span>
+            </button>
+        </div>
+
+        <div x-data="{ 
+            devices: {}, 
+            diagnostics: {}, 
+            selectedMac: null, 
+            filters: { mac: '', ssid: '', minScore: 0 }, 
+            widgets: JSON.parse(localStorage.getItem('widgets')) || ['devices', 'diagnostics', 'signal', 'ssid', 'persistence', 'channel']
+        }">
+            <!-- Filters -->
+            <div class="bg-gray-800 rounded-lg shadow-lg p-4 mb-6">
+                <h2 class="text-xl mb-4">Filters</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                        <label for="mac-filter" class="block text-sm">MAC Filter (Regex)</label>
+                        <input id="mac-filter" x-model.debounce="filters.mac" type="text" class="w-full p-2 rounded bg-gray-700 text-white border-none" placeholder="e.g., ^00:.*">
+                    </div>
+                    <div>
+                        <label for="ssid-filter" class="block text-sm">SSID Filter (Regex)</label>
+                        <input id="ssid-filter" x-model.debounce="filters.ssid" type="text" class="w-full p-2 rounded bg-gray-700 text-white border-none" placeholder="e.g., FreeWiFi">
+                    </div>
+                    <div>
+                        <label for="score-filter" class="block text-sm">Min Anomaly Score</label>
+                        <input id="score-filter" x-model="filters.minScore" type="range" min="0" max="1" step="0.1" class="w-full">
+                        <span x-text="filters.minScore"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Widgets -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="widgets" x-ref="widgets">
+                <!-- Devices Widget -->
+                <div x-show="widgets.includes('devices')" class="bg-gray-800 rounded-lg shadow-lg p-4 widget" data-widget="devices">
+                    <h2 class="text-2xl mb-4">Devices</h2>
+                    <table class="w-full" aria-label="Device List">
+                        <thead>
+                            <tr class="bg-gray-700">
+                                <th class="p-3">MAC</th>
+                                <th class="p-3">Vendor</th>
+                                <th class="p-3">SSIDs</th>
+                                <th class="p-3">RSSI</th>
+                                <th class="p-3">Anomaly</th>
+                                <th class="p-3">Persistence</th>
+                                <th class="p-3">Pattern</th>
+                                <th class="p-3">Deauths</th>
+                                <th class="p-3">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="[mac, device] in Object.entries(devices).filter(([m, d]) => 
+                                (!filters.mac || new RegExp(filters.mac, 'i').test(m)) &&
+                                (!filters.ssid || d.ssid_list.some(s => new RegExp(filters.ssid, 'i').test(s))) &&
+                                d.anomaly_score >= filters.minScore)" :key="mac">
+                                <tr :class="device.anomaly_score > 0.8 ? 'bg-red-900 animate-pulse' : ''">
+                                    <td class="p-3" x-text="mac"></td>
+                                    <td class="p-3" x-text="device.vendor"></td>
+                                    <td class="p-3" x-text="device.ssid_list.join(', ')" x-tooltip="device.ssid_list.join('\n')"></td>
+                                    <td class="p-3" x-text="device.rssi_list[device.rssi_list.length - 1] || 'N/A'"></td>
+                                    <td class="p-3" :class="device.anomaly_score > 0.8 ? 'text-red-500' : 'text-green-400'" x-text="device.anomaly_score.toFixed(2)"></td>
+                                    <td class="p-3" x-text="device.persistence_score.toFixed(2)"></td>
+                                    <td class="p-3" x-text="device.pattern_score.toFixed(2)"></td>
+                                    <td class="p-3" :class="device.deauth_count > 5 ? 'text-red-500' : ''" x-text="device.deauth_count"></td>
+                                    <td class="p-3">
+                                        <button @click="selectedMac = mac" class="text-neon-green hover:underline" aria-label="View details">Details</button>
+                                        <button @click="fetch('/ban/' + mac).then(() => alert('Banned ' + mac))" class="text-neon-green hover:underline ml-2" aria-label="Ban device">Ban</button>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Diagnostics Widget -->
+                <div x-show="widgets.includes('diagnostics')" class="bg-gray-800 rounded-lg shadow-lg p-4 widget" data-widget="diagnostics">
+                    <h2 class="text-2xl mb-4">ESP8266 Diagnostics</h2>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <p><strong>Free Heap:</strong> <span x-text="diagnostics.free_heap || 'N/A'"></span> bytes</p>
+                            <canvas id="heap-gauge" width="100" height="100"></canvas>
+                        </div>
+                        <div>
+                            <p><strong>Uptime:</strong> <span x-text="diagnostics.uptime ? diagnostics.uptime.toFixed(2) : 'N/A'"></span> seconds</p>
+                            <canvas id="uptime-gauge" width="100" height="100"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Charts -->
+                <div x-show="widgets.includes('signal')" class="bg-gray-800 rounded-lg shadow-lg p-4 widget" data-widget="signal">
+                    <h2 class="text-2xl mb-4">Signal Strength</h2>
+                    <canvas id="signal-chart"></canvas>
+                </div>
+                <div x-show="widgets.includes('ssid')" class="bg-gray-800 rounded-lg shadow-lg p-4 widget" data-widget="ssid">
+                    <h2 class="text-2xl mb-4">SSID Distribution</h2>
+                    <canvas id="ssid-chart"></canvas>
+                </div>
+                <div x-show="widgets.includes('persistence')" class="bg-gray-800 rounded-lg shadow-lg p-4 widget" data-widget="persistence">
+                    <h2 class="text-2xl mb-4">Persistence Timeline</h2>
+                    <canvas id="persistence-chart"></canvas>
+                </div>
+                <div x-show="widgets.includes('channel')" class="bg-gray-800 rounded-lg shadow-lg p-4 widget" data-widget="channel">
+                    <h2 class="text-2xl mb-4">Channel Activity</h2>
+                    <canvas id="channel-chart"></canvas>
+                </div>
+            </div>
+
+            <!-- Device Details Modal -->
+            <div x-show="selectedMac" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" @keydown.escape="selectedMac = null">
+                <div class="bg-gray-800 p-6 rounded-lg max-w-lg w-full animate-fade-in">
+                    <h3 class="text-2xl mb-4">Device Details</h3>
+                    <p><strong>MAC:</strong> <span x-text="selectedMac"></span></p>
+                    <p><strong>Vendor:</strong> <span x-text="devices[selectedMac]?.vendor"></span></p>
+                    <p><strong>SSIDs:</strong> <span x-text="devices[selectedMac]?.ssid_list.join(', ')"></span></p>
+                    <p><strong>Anomaly Score:</strong> <span x-text="devices[selectedMac]?.anomaly_score.toFixed(2)"></span></p>
+                    <p><strong>Persistence:</strong> <span x-text="devices[selectedMac]?.persistence_score.toFixed(2)"></span></p>
+                    <p><strong>Pattern Score:</strong> <span x-text="devices[selectedMac]?.pattern_score.toFixed(2)"></span></p>
+                    <p><strong>Channels:</strong> <span x-text="Object.keys(devices[selectedMac]?.channel_counts || {}).join(', ')"></span></p>
+                    <button @click="selectedMac = null" class="bg-neon-green text-gray-900 px-4 py-2 mt-4 rounded hover:bg-green-400" aria-label="Close modal">Close</button>
+                </div>
+            </div>
+
+            <!-- Controls -->
+            <div class="fixed bottom-4 right-4 flex space-x-4">
+                <button @click="fetch('/export/csv?preset=high_risk').then(() => alert('Exported high-risk to CSV'))" class="bg-neon-green text-gray-900 px-4 py-2 rounded hover:bg-green-400" aria-label="Export high-risk CSV">High-Risk CSV</button>
+                <button @click="fetch('/export/json?preset=recent').then(() => alert('Exported recent to JSON'))" class="bg-neon-green text-gray-900 px-4 py-2 rounded hover:bg-green-400" aria-label="Export recent JSON">Recent JSON</button>
+                <button @click="fetch('/cleanup').then(res => res.json()).then(data => alert(data.status))" class="bg-neon-green text-gray-900 px-4 py-2 rounded hover:bg-green-400" aria-label="Cleanup logs">Cleanup</button>
+            </div>
+        </div>
+    </div>
+    <script src="/static/dashboard.js"></script>
+</body>
+</html>   </div>
+        </div>
+    </div>
+    <script src="/static/dashboard.js"></script>
+</body>
+</html>
