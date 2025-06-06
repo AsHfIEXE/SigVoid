@@ -1,0 +1,10 @@
+   venv/
+   __pycache__/
+   *.pyc
+   *.log.*
+   server.log
+   sigvoid.log
+   alerts.log
+   export.csv
+   banned_macs.txt
+   *.db-journal

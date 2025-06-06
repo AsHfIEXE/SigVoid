@@ -1,0 +1,155 @@
+```yaml
+name: SigVoid CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Set up Python
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      # Set up Node.js
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Cache Python dependencies
+      - name: Cache Python dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+
+      # Cache Node.js dependencies
+      - name: Cache Node.js dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('package.json') }}
+          restore-keys: ${{ runner.os }}-npm-
+
+      # Install system dependencies
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl sqlite3
+
+      # Install Python dependencies
+      - name: Install Python dependencies
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          pip install --upgrade pip
+          pip install fastapi uvicorn pyserial aiohttp pandas pylint pytest
+
+      # Install Node.js dependencies
+      - name: Install Node.js dependencies
+        run: npm install -g tailwindcss
+
+      # Lint Python code
+      - name: Lint Python with pylint
+        run: |
+          source venv/bin/activate
+          pylint backend/*.py --disable=C0114,C0116 --max-line-length=120
+
+      # Run Python tests
+      - name: Run pytest
+        run: |
+          source venv/bin/activate
+          pytest tests/ -v
+
+      # Build TailwindCSS
+      - name: Build TailwindCSS
+        run: npx tailwindcss -i input.css -o frontend/static/styles.css --minify
+
+      # Validate SQLite database schema
+      - name: Validate SQLite schema
+        run: |
+          sqlite3 database/oui.db ".schema" > schema.sql
+          grep -q "CREATE TABLE oui" schema.sql
+          grep -q "CREATE TABLE logs" schema.sql
+
+      # Check Arduino sketch compilation
+      - name: Install Arduino CLI
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/arduino/install-cli/master/install.sh | sh
+          arduino-cli config init
+          arduino-cli core install esp8266:esp8266
+
+      - name: Compile Arduino sketch
+        run: |
+          arduino-cli compile --fqbn esp8266:esp8266:nodemcu esp8266/rogue_ap.ino
+
+      # Placeholder for frontend tests
+      - name: Placeholder for frontend tests
+        run: echo "Frontend tests to be implemented (e.g., Jest for dashboard.js)"
+
+    # Optional: Upload artifacts
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sigvoid-build
+          path: |
+            frontend/static/styles.css
+            database/*.db
+```
+
+</xaiartifact>
+
+---
+
+#### Setup Instructions
+1. **Create Workflow**:
+   - In your `SigVoid` directory:
+     ```bash
+     mkdir -p .github/workflows
+     ```
+   - Save the `ci.yml` above as `.github/workflows/ci.yml`.
+
+2. **Add `requirements.txt`**:
+   - Create `requirements.txt` in the root:
+     ```text
+     fastapi==0.115.0
+     uvicorn==0.30.1
+     pyserial==3.5
+     aiohttp==3.10.5
+     pandas==2.2.2
+     pylint==3.2.6
+     pytest==7.7.1
+     ```
+   - Commit:
+     ```bash
+     git add requirements.txt
+     git commit -m "Add requirements.txt for CI/CD"
+     ```
+
+3. **Add Minimal Tests**:
+   - Create `tests/` directory with a basic test:
+     <xaiArtifact artifact_id="test_analyzer.py" contentType="text/x-python">
+     ```python
+     import pytest
+     from backend.analyzer import Analyzer
+
+     def test_anomaly_score():
+         analyzer = Analyzer()
+         data = {"mac": "00:11:22:33:44:55", "ssid": "TestWiFi", "rssi": -30, "deauth_count": 10}
+         score = analyzer.calculate_anomaly(data)
+         assert 0 <= score <= 1
+         assert score > 0.7  # High score for high deauths
+     ```
