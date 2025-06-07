@@ -12,12 +12,19 @@ ALERT_COOLDOWN_SECONDS = 300 # 5 minutes
 # --- NEW HELPER FUNCTIONS FOR BLOCKING I/O ---
 def _blocking_write_alert_to_file(message: str):
     """Blocking helper function to write alert to file."""
+    # Using 'a' for append mode. File is created if it doesn't exist.
     with open("alerts.log", "a") as f:
         f.write(message)
 
 def _blocking_play_audio_alert():
     """Blocking helper function to play audio alert."""
-    os.system("aplay alert.wav")
+    try:
+        os.system("aplay alert.wav")
+    except Exception as e:
+        # This is a blocking function's error handling.
+        # The main async loop is protected by run_in_executor.
+        print(f"Error during audio playback (blocking call): {e}")
+
 # ---------------------------------------------
 
 async def send_alert(mac: str, device: Dict):
@@ -35,19 +42,17 @@ async def send_alert(mac: str, device: Dict):
         f"Deauths={device['deauth_count']}, Vendor={device['vendor']}\n"
     )
 
-    # File-based alert
+    # File-based alert (run in executor to avoid blocking main loop)
     try:
-        # Run the blocking file write in a separate thread via the executor
         await asyncio.get_event_loop().run_in_executor(None, _blocking_write_alert_to_file, alert_message)
     except Exception as e:
-        print(f"Error writing alert to file: {e}")
+        print(f"Error scheduling file alert: {e}")
     
-    # Audio alert
+    # Audio alert (run in executor to avoid blocking main loop)
     try:
-        # Run the blocking os.system call in a separate thread via the executor
         await asyncio.get_event_loop().run_in_executor(None, _blocking_play_audio_alert)
     except Exception as e:
-        print(f"Audio alert failed: {e}. Check 'alert.wav' and 'aplay'.")
+        print(f"Error scheduling audio alert: {e}")
     
     # Optional Telegram alert (uncomment and configure if needed)
     """

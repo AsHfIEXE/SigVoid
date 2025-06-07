@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SigVoid Dashboard</title>
+    <!-- Use /frontend/static/ for consistency across all static assets as requested -->
     <link href="/frontend/static/styles.css" rel="stylesheet">
     <link rel="manifest" href="/frontend/static/manifest.json">
     <meta name="theme-color" content="#111827">
@@ -43,7 +44,7 @@
                 </a>
                 <a href="#" @click="activeTab = 'settings'; sidebarOpen = false; localStorage.setItem('activeTab', 'settings')" 
                    :class="activeTab === 'settings' ? 'bg-gray-700 text-neon-green font-bold shadow-md ring-1 ring-neon-green/50' : 'text-gray-300 hover:bg-gray-700 hover:text-white'" 
-                   class="flex items-center py-3.5 px-4 rounded-lg transition-all duration-200 group relative overflow-hidden text-lg tracking-wide">
+                   class="flex items-center py-3.5 px-4 rounded-lg transition-all duration-200 group relative overflow-hidden">
                    <span class="absolute inset-y-0 left-0 w-1 bg-neon-green transform scale-y-0 group-hover:scale-y-100 origin-top transition-transform duration-200" :class="activeTab === 'settings' ? 'scale-y-100' : ''"></span>
                    <span class="relative ml-2">Settings</span>
                 </a>
