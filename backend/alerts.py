@@ -1,24 +1,62 @@
+# backend/alerts.py
 import time
 import aiohttp
 import asyncio
 import os
+from typing import Dict
+
+# Simple in-memory throttling for alerts
+_alert_cooldown: Dict[str, float] = {} # {mac: last_alert_timestamp}
+ALERT_COOLDOWN_SECONDS = 300 # 5 minutes
+
+# --- NEW HELPER FUNCTIONS FOR BLOCKING I/O ---
+def _blocking_write_alert_to_file(message: str):
+    """Blocking helper function to write alert to file."""
+    with open("alerts.log", "a") as f:
+        f.write(message)
+
+def _blocking_play_audio_alert():
+    """Blocking helper function to play audio alert."""
+    os.system("aplay alert.wav")
+# ---------------------------------------------
 
 async def send_alert(mac: str, device: Dict):
+    # Check cooldown
+    current_time = time.time()
+    if mac in _alert_cooldown and (current_time - _alert_cooldown[mac] < ALERT_COOLDOWN_SECONDS):
+        # print(f"Alert for {mac} throttled.") # Uncomment for debugging throttling
+        return # Skip alert due to cooldown
+    
+    _alert_cooldown[mac] = current_time # Update last alert timestamp
+
+    alert_message = (
+        f"{time.ctime()}: Suspicious - MAC={mac}, Score={device['anomaly_score']:.2f}, "
+        f"Persistence={device['persistence_score']:.2f}, Pattern={device['pattern_score']:.2f}, "
+        f"Deauths={device['deauth_count']}, Vendor={device['vendor']}\n"
+    )
+
     # File-based alert
-    with open("alerts.log", "a") as f:
-        f.write(f"{time.ctime()}: Suspicious - MAC={mac}, Score={device['anomaly_score']:.2f}, Persistence={device['persistence_score']:.2f}, Pattern={device['pattern_score']:.2f}, Deauths={device['deauth_count']}, Vendor={device['vendor']}\n")
+    try:
+        # Run the blocking file write in a separate thread via the executor
+        await asyncio.get_event_loop().run_in_executor(None, _blocking_write_alert_to_file, alert_message)
+    except Exception as e:
+        print(f"Error writing alert to file: {e}")
     
     # Audio alert
     try:
-        os.system("aplay alert.wav")
-    except:
-        print("Audio alert failed. Check 'alert.wav' and 'aplay'.")
+        # Run the blocking os.system call in a separate thread via the executor
+        await asyncio.get_event_loop().run_in_executor(None, _blocking_play_audio_alert)
+    except Exception as e:
+        print(f"Audio alert failed: {e}. Check 'alert.wav' and 'aplay'.")
     
-    # Optional Telegram alert
+    # Optional Telegram alert (uncomment and configure if needed)
     """
-    async with aiohttp.ClientSession() as session:
-        await session.post(
-            "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/sendMessage",
-            json={"chat_id": "<YOUR_CHAT_ID>", "text": f"Suspicious: {mac}, Score: {device['anomaly_score']:.2f}, Pattern: {device['pattern_score']:.2f}"}
-        )
+    try:
+        async with aiohttp.ClientSession() as session:
+            await session.post(
+                "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/sendMessage",
+                json={"chat_id": "<YOUR_CHAT_ID>", "text": alert_message}
+            )
+    except Exception as e:
+        print(f"Telegram alert failed: {e}")
     """

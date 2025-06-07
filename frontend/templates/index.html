@@ -1,276 +1,275 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" x-data="{ theme: localStorage.getItem('theme') || 'dark', sidebarOpen: false, activeTab: localStorage.getItem('activeTab') || 'dashboard', isLoading: false }" :class="theme === 'dark' ? 'dark' : 'light'">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SigVoid Dashboard</title>
-    <link href="/static/styles.css" rel="stylesheet">
-    <link rel="manifest" href="/static/manifest.json">
+    <link href="/frontend/static/styles.css" rel="stylesheet">
+    <link rel="manifest" href="/frontend/static/manifest.json">
     <meta name="theme-color" content="#111827">
-    <script src="/static/chart.min.js"></script>
-    <script src="/static/alpine.min.js" defer></script>
-    <script src="/static/socket.io.min.js"></script>
-</head>
-<body class="bg-gray-900 text-white font-mono">
-    <div class="container mx-auto p-6" x-data="{ devices: {}, diagnostics: {}, selectedMac: null }">
-        <h1 class="text-4xl font-bold mb-6 text-neon-green">SigVoid</h1>
-
-        <!-- Controls -->
-        <div class="mb-6 flex flex-wrap space-x-4">
-            <button @click="fetch('/export/csv?min_score=0.5').then(() => alert('Exported high-risk to CSV'))" class="bg-neon-green text-gray-900 px-4 py-2 rounded hover:bg-green-400">Export High-Risk CSV</button>
-            <button @click="fetch('/export/json').then(() => alert('Exported to JSON'))" class="bg-neon-green text-gray-900 px-4 py-2 rounded hover:bg-green-400">Export JSON</button>
-            <button @click="fetch('/cleanup').then(res => res.json()).then(data => alert(data.status))" class="bg-neon-green text-gray-900 px-4 py-2 rounded hover:bg-green-400">Cleanup Logs</button>
-            <button @click="fetch('/diagnostics').then(res => res.json()).then(data => diagnostics = data)" class="bg-neon-green text-gray-900 px-4 py-2 rounded hover:bg-green-400">Refresh Diagnostics</button>
-        </div>
-
-        <!-- Diagnostics Panel -->
-        <div class="bg-gray-800 rounded-lg shadow-lg p-4 mb-6">
-            <h2 class="text-2xl mb-4">ESP8266 Diagnostics</h2>
-            <p><strong>Free Heap:</strong> <span x-text="diagnostics.free_heap || 'N/A'"></span> bytes</p>
-            <p><strong>Uptime:</strong> <span x-text="diagnostics.uptime ? diagnostics.uptime.toFixed(2) : 'N/A'"></span> seconds</p>
-        </div>
-
-        <!-- Device Table -->
-        <div class="bg-gray-800 rounded-lg shadow-lg p-4 mb-6">
-            <h2 class="text-2xl mb-4">Devices</h2>
-            <table class="w-full">
-                <thead>
-                    <tr class="bg-gray-700">
-                        <th class="p-3">MAC</th>
-                        <th class="p-3">Vendor</th>
-                        <th class="p-3">SSIDs</th>
-                        <th class="p-3">RSSI</th>
-                        <th class="p-3">Anomaly</th>
-                        <th class="p-3">Persistence</th>
-                        <th class="p-3">Pattern</th>
-                        <th class="p-3">Deauths</th>
-                        <th class="p-3">Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <template x-for="(device, mac) in devices" :key="mac">
-                        <tr :class="device.anomaly_score > 0.8 ? 'bg-red-900' : ''">
-                            <td class="p-3" x-text="mac"></td>
-                            <td class="p-3" x-text="device.vendor"></td>
-                            <td class="p-3" x-text="device.ssid_list.join(', ')"></td>
-                            <td class="p-3" x-text="device.rssi_list[device.rssi_list.length - 1] || 'N/A'"></td>
-                            <td class="p-3" :class="device.anomaly_score > 0.8 ? 'text-red-500' : 'text-green-400'" x-text="device.anomaly_score.toFixed(2)"></td>
-                            <td class="p-3" x-text="device.persistence_score.toFixed(2)"></td>
-                            <td class="p-3" x-text="device.pattern_score.toFixed(2)"></td>
-                            <td class="p-3" :class="device.deauth_count > 5 ? 'text-red-500' : ''" x-text="device.deauth_count"></td>
-                            <td class="p-3">
-                                <button @click="selectedMac = mac" class="text-neon-green hover:underline">Details</button>
-                                <button @click="fetch('/ban/' + mac).then(() => alert('Banned ' + mac))" class="text-neon-green hover:underline ml-2">Ban</button>
-                            </td>
-                        </tr>
-                    </template>
-                </tbody>
-            </table>
-        </div>
-
-        <!-- Device Details Modal -->
-        <div x-show="selectedMac" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-            <div class="bg-gray-800 p-6 rounded-lg max-w-lg w-full">
-                <h3 class="text-2xl mb-4">Device Details</h3>
-                <p><strong>MAC:</strong> <span x-text="selectedMac"></span></p>
-                <p><strong>Vendor:</strong> <span x-text="devices[selectedMac]?.vendor"></span></p>
-                <p><strong>SSIDs:</strong> <span x-text="devices[selectedMac]?.ssid_list.join(', ')"></span></p>
-                <p><strong>Anomaly Score:</strong> <span x-text="devices[selectedMac]?.anomaly_score.toFixed(2)"></span></p>
-                <p><strong>Persistence:</strong> <span x-text="devices[selectedMac]?.persistence_score.toFixed(2)"></span></p>
-                <p><strong>Pattern Score:</strong> <span x-text="devices[selectedMac]?.pattern_score.toFixed(2)"></span></p>
-                <p><strong>Channels:</strong> <span x-text="Object.keys(devices[selectedMac]?.channel_counts || {}).join(', ')"></span></p>
-                <button @click="selectedMac = null" class="bg-neon-green text-gray-900 px-4 py-2 mt-4 rounded">Close</button>
-            </div>
-        </div>
-
-        <!-- Charts -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div class="bg-gray-800 rounded-lg shadow-lg p-4">
-                <h2 class="text-2xl mb-4">Signal Strength</h2>
-                <canvas id="signal-chart"></canvas>
-            </div>
-            <div class="bg-gray-800 rounded-lg shadow-lg p-4">
-                <h2 class="text-2xl mb-4">SSID Distribution</h2>
-                <canvas id="ssid-chart"></canvas>
-            </div>
-            <div class="bg-gray-800 rounded-lg shadow-lg p-4">
-                <h2 class="text-2xl mb-4">Persistence Timeline</h2>
-                <canvas id="persistence-chart"></canvas>
-            </div>
-            <div class="bg-gray-800 rounded-lg shadow-lg p-4">
-                <h2 class="text-2xl mb-4">Channel Activity</h2>
-                <canvas id="channel-chart"></canvas>
-         <!DOCTYPE html>
-<html lang="en" x-data="{ theme: localStorage.getItem('theme') || 'dark', sidebarOpen: false }">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SigVoid Dashboard</title>
-    <link href="/static/styles.css" rel="stylesheet">
-    <link rel="manifest" href="/static/manifest.json">
-    <meta name="theme-color" content="#111827">
-    <script src="/static/chart.min.js"></script>
-    <script src="/static/alpine.min.js" defer></script>
-    <script src="/static/socket.io.min.js"></script>
-    <script src="/static/interact.min.js"></script>
+    <script src="/frontend/static/chart.min.js"></script>
+    <script src="/frontend/static/alpine.min.js" defer></script>
+    <script src="/frontend/static/socket.io.min.js"></script>
+    <script src="/frontend/static/interact.min.js"></script>
 </head>
 <body :class="theme === 'dark' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-900'" class="font-mono transition-colors duration-300">
+    <!-- Toast Notification System -->
+    <div x-data="{ toasts: [] }"
+         @toast.window="toasts.push({ id: Date.now(), message: $event.detail.message, type: $event.detail.type || 'info' }); setTimeout(() => toasts = toasts.filter(t => t.id !== $event.detail.id), 3000)"
+         class="fixed top-6 right-6 z-[9999] space-y-3 pointer-events-none">
+        <template x-for="toast in toasts" :key="toast.id">
+            <div :class="{
+                'bg-green-600': toast.type === 'success',
+                'bg-red-600': toast.type === 'error',
+                'bg-blue-600': toast.type === 'info',
+                'bg-yellow-600': toast.type === 'warning'
+            }" class="px-6 py-4 rounded-xl shadow-2xl text-white text-base animate-fade-in pointer-events-auto border border-white border-opacity-20 backdrop-blur-sm">
+                <span x-text="toast.message"></span>
+            </div>
+        </template>
+    </div>
+
     <!-- Sidebar -->
     <div x-show="sidebarOpen" class="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden" @click="sidebarOpen = false"></div>
-    <div :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'" class="fixed inset-y-0 left-0 w-64 bg-gray-800 shadow-lg transform transition-transform duration-300 z-50 lg:translate-x-0">
-        <div class="p-4">
-            <h2 class="text-2xl font-bold text-neon-green">SigVoid</h2>
-            <nav class="mt-6">
-                <a href="#devices" class="block py-2 px-4 text-gray-300 hover:bg-gray-700 rounded" @click="sidebarOpen = false">Devices</a>
-                <a href="#diagnostics" class="block py-2 px-4 text-gray-300 hover:bg-gray-700 rounded" @click="sidebarOpen = false">Diagnostics</a>
-                <a href="#settings" class="block py-2 px-4 text-gray-300 hover:bg-gray-700 rounded" @click="sidebarOpen = false">Settings</a>
+    <div :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'" class="fixed inset-y-0 left-0 w-64 bg-gray-800 shadow-xl transform transition-transform duration-300 z-50 lg:translate-x-0 overflow-y-auto border-r border-gray-700">
+        <div class="p-6">
+            <h2 class="text-3xl font-extrabold text-neon-green mb-10 tracking-widest uppercase">SigVoid</h2>
+            <nav class="space-y-4">
+                <a href="#" @click="activeTab = 'dashboard'; sidebarOpen = false; localStorage.setItem('activeTab', 'dashboard')" 
+                   :class="activeTab === 'dashboard' ? 'bg-gray-700 text-neon-green font-bold shadow-md ring-1 ring-neon-green/50' : 'text-gray-300 hover:bg-gray-700 hover:text-white'" 
+                   class="flex items-center py-3.5 px-4 rounded-lg transition-all duration-200 group relative overflow-hidden text-lg tracking-wide">
+                   <span class="absolute inset-y-0 left-0 w-1 bg-neon-green transform scale-y-0 group-hover:scale-y-100 origin-top transition-transform duration-200" :class="activeTab === 'dashboard' ? 'scale-y-100' : ''"></span>
+                   <span class="relative ml-2">Dashboard</span>
+                </a>
+                <a href="#" @click="activeTab = 'settings'; sidebarOpen = false; localStorage.setItem('activeTab', 'settings')" 
+                   :class="activeTab === 'settings' ? 'bg-gray-700 text-neon-green font-bold shadow-md ring-1 ring-neon-green/50' : 'text-gray-300 hover:bg-gray-700 hover:text-white'" 
+                   class="flex items-center py-3.5 px-4 rounded-lg transition-all duration-200 group relative overflow-hidden text-lg tracking-wide">
+                   <span class="absolute inset-y-0 left-0 w-1 bg-neon-green transform scale-y-0 group-hover:scale-y-100 origin-top transition-transform duration-200" :class="activeTab === 'settings' ? 'scale-y-100' : ''"></span>
+                   <span class="relative ml-2">Settings</span>
+                </a>
             </nav>
         </div>
     </div>
 
     <!-- Main Content -->
-    <div class="lg:ml-64 p-6">
-        <div class="flex justify-between items-center mb-6">
-            <button class="lg:hidden text-neon-green text-2xl" @click="sidebarOpen = true">☰</button>
-            <h1 class="text-4xl font-bold text-neon-green">SigVoid</h1>
-            <button @click="theme = theme === 'dark' ? 'light' : 'dark'; localStorage.setItem('theme', theme)" class="text-neon-green hover:text-green-400" aria-label="Toggle theme">
+    <div class="lg:ml-64 p-8">
+        <div class="flex justify-between items-center mb-10 pb-5 border-b border-gray-700 dark:border-gray-700 light:border-gray-300">
+            <button class="lg:hidden text-neon-green text-4xl hover:text-green-400 transition-colors" @click="sidebarOpen = true" aria-label="Open sidebar">☰</button>
+            <h1 class="text-6xl font-extrabold text-neon-green animate-fade-in-slow tracking-wider uppercase">SigVoid</h1>
+            <button @click="theme = theme === 'dark' ? 'light' : 'dark'; localStorage.setItem('theme', theme)" class="text-4xl text-neon-green hover:text-green-400 transition-colors" aria-label="Toggle theme">
                 <span x-show="theme === 'dark'">🌙</span>
                 <span x-show="theme === 'light'">☀️</span>
             </button>
         </div>
 
-        <div x-data="{ 
+        <!-- Dashboard Tab -->
+        <div x-show="activeTab === 'dashboard'" x-data="{ 
             devices: {}, 
             diagnostics: {}, 
             selectedMac: null, 
             filters: { mac: '', ssid: '', minScore: 0 }, 
             widgets: JSON.parse(localStorage.getItem('widgets')) || ['devices', 'diagnostics', 'signal', 'ssid', 'persistence', 'channel']
-        }">
+        }" x-init="
+            Alpine.store('devices', devices);
+            Alpine.store('diagnostics', diagnostics);
+
+            $nextTick(() => {
+                const widgetElements = Array.from($refs.widgets.children);
+                widgets.forEach((widgetId, index) => {
+                    const el = widgetElements.find(w => w.dataset.widget === widgetId);
+                    if (el) {
+                        el.style.order = index;
+                    }
+                });
+            });
+        ">
             <!-- Filters -->
-            <div class="bg-gray-800 rounded-lg shadow-lg p-4 mb-6">
-                <h2 class="text-xl mb-4">Filters</h2>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="bg-gray-800 rounded-xl shadow-2xl p-8 mb-10 border border-gray-700 widget-card">
+                <h2 class="text-3xl font-bold mb-6 text-gray-100 dark:text-gray-100 light:text-gray-900">Filters</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
                     <div>
-                        <label for="mac-filter" class="block text-sm">MAC Filter (Regex)</label>
-                        <input id="mac-filter" x-model.debounce="filters.mac" type="text" class="w-full p-2 rounded bg-gray-700 text-white border-none" placeholder="e.g., ^00:.*">
+                        <label for="mac-filter" class="block text-sm text-gray-300 mb-2">MAC Filter (Regex)</label>
+                        <input id="mac-filter" x-model.debounce.500="filters.mac" type="text" class="w-full p-3.5 rounded-md bg-gray-700 text-white border-none focus:ring-2 focus:ring-neon-green focus:outline-none transition-all duration-200 placeholder:text-gray-400" placeholder="e.g., ^00:.*">
                     </div>
                     <div>
-                        <label for="ssid-filter" class="block text-sm">SSID Filter (Regex)</label>
-                        <input id="ssid-filter" x-model.debounce="filters.ssid" type="text" class="w-full p-2 rounded bg-gray-700 text-white border-none" placeholder="e.g., FreeWiFi">
+                        <label for="ssid-filter" class="block text-sm text-gray-300 mb-2">SSID Filter (Regex)</label>
+                        <input id="ssid-filter" x-model.debounce.500="filters.ssid" type="text" class="w-full p-3.5 rounded-md bg-gray-700 text-white border-none focus:ring-2 focus:ring-neon-green focus:outline-none transition-all duration-200 placeholder:text-gray-400" placeholder="e.g., FreeWiFi">
                     </div>
                     <div>
-                        <label for="score-filter" class="block text-sm">Min Anomaly Score</label>
-                        <input id="score-filter" x-model="filters.minScore" type="range" min="0" max="1" step="0.1" class="w-full">
-                        <span x-text="filters.minScore"></span>
+                        <label for="score-filter" class="block text-sm text-gray-300 mb-2">Min Anomaly Score: <span class="font-bold text-neon-green text-lg" x-text="filters.minScore"></span></label>
+                        <input id="score-filter" x-model="filters.minScore" type="range" min="0" max="1" step="0.1" class="w-full h-3 bg-gray-700 rounded-lg appearance-none cursor-pointer range-lg transition-all duration-200">
                     </div>
                 </div>
             </div>
 
-            <!-- Widgets -->
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="widgets" x-ref="widgets">
+            <!-- Widgets Container (Flexbox for D&D reordering) -->
+            <div class="flex flex-wrap gap-6" id="widgets" x-ref="widgets">
                 <!-- Devices Widget -->
-                <div x-show="widgets.includes('devices')" class="bg-gray-800 rounded-lg shadow-lg p-4 widget" data-widget="devices">
-                    <h2 class="text-2xl mb-4">Devices</h2>
-                    <table class="w-full" aria-label="Device List">
-                        <thead>
-                            <tr class="bg-gray-700">
-                                <th class="p-3">MAC</th>
-                                <th class="p-3">Vendor</th>
-                                <th class="p-3">SSIDs</th>
-                                <th class="p-3">RSSI</th>
-                                <th class="p-3">Anomaly</th>
-                                <th class="p-3">Persistence</th>
-                                <th class="p-3">Pattern</th>
-                                <th class="p-3">Deauths</th>
-                                <th class="p-3">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <template x-for="[mac, device] in Object.entries(devices).filter(([m, d]) => 
-                                (!filters.mac || new RegExp(filters.mac, 'i').test(m)) &&
-                                (!filters.ssid || d.ssid_list.some(s => new RegExp(filters.ssid, 'i').test(s))) &&
-                                d.anomaly_score >= filters.minScore)" :key="mac">
-                                <tr :class="device.anomaly_score > 0.8 ? 'bg-red-900 animate-pulse' : ''">
-                                    <td class="p-3" x-text="mac"></td>
-                                    <td class="p-3" x-text="device.vendor"></td>
-                                    <td class="p-3" x-text="device.ssid_list.join(', ')" x-tooltip="device.ssid_list.join('\n')"></td>
-                                    <td class="p-3" x-text="device.rssi_list[device.rssi_list.length - 1] || 'N/A'"></td>
-                                    <td class="p-3" :class="device.anomaly_score > 0.8 ? 'text-red-500' : 'text-green-400'" x-text="device.anomaly_score.toFixed(2)"></td>
-                                    <td class="p-3" x-text="device.persistence_score.toFixed(2)"></td>
-                                    <td class="p-3" x-text="device.pattern_score.toFixed(2)"></td>
-                                    <td class="p-3" :class="device.deauth_count > 5 ? 'text-red-500' : ''" x-text="device.deauth_count"></td>
-                                    <td class="p-3">
-                                        <button @click="selectedMac = mac" class="text-neon-green hover:underline" aria-label="View details">Details</button>
-                                        <button @click="fetch('/ban/' + mac).then(() => alert('Banned ' + mac))" class="text-neon-green hover:underline ml-2" aria-label="Ban device">Ban</button>
-                                    </td>
+                <div x-show="widgets.includes('devices')" class="bg-gray-800 rounded-xl shadow-2xl p-8 widget flex-grow w-full md:w-[calc(50%-1.5rem)] lg:w-[calc(50%-1.5rem)] border border-gray-700 widget-card" data-widget="devices">
+                    <h2 class="text-3xl font-bold mb-6 text-gray-100 dark:text-gray-100 light:text-gray-900">Devices</h2>
+                    <div class="overflow-x-auto text-sm scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-gray-800">
+                        <table class="w-full table-auto">
+                            <thead>
+                                <tr class="bg-gray-700 text-gray-300 uppercase text-xs tracking-wider">
+                                    <th class="p-4 text-left rounded-tl-lg">MAC</th>
+                                    <th class="p-4 text-left">Vendor</th>
+                                    <th class="p-4 text-left">SSIDs</th>
+                                    <th class="p-4 text-left">RSSI</th>
+                                    <th class="p-4 text-left">Anomaly</th>
+                                    <th class="p-4 text-left">Persistence</th>
+                                    <th class="p-4 text-left">Pattern</th>
+                                    <th class="p-4 text-left">Deauths</th>
+                                    <th class="p-4 text-left rounded-tr-lg">Actions</th>
                                 </tr>
-                            </template>
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody>
+                                <template x-for="(device, mac) in Object.entries(devices).filter(([m, d]) => 
+                                    (!filters.mac || new RegExp(filters.mac, 'i').test(m)) &&
+                                    (!filters.ssid || d.ssid_list.some(s => new RegExp(filters.ssid, 'i').test(s))) &&
+                                    d.anomaly_score >= filters.minScore
+                                )" :key="mac">
+                                    <tr :class="device.anomaly_score > 0.8 ? 'bg-red-900/50 animate-pulse' : 'hover:bg-gray-700/50 transition-colors duration-150'" class="border-t border-gray-700/70">
+                                        <td class="p-4 whitespace-nowrap text-gray-200" x-text="mac"></td>
+                                        <td class="p-4 text-gray-300" x-text="device.vendor"></td>
+                                        <td class="p-4 text-gray-300" :title="device.ssid_list.join('\n')">
+                                            <span x-text="device.ssid_list.slice(0, 1).join(', ') + (device.ssid_list.length > 1 ? '...' : '')"></span>
+                                        </td>
+                                        <td class="p-4 text-gray-300" x-text="device.rssi_list[device.rssi_list.length - 1] || 'N/A'"></td>
+                                        <td class="p-4" :class="device.anomaly_score > 0.8 ? 'text-red-400' : 'text-green-400'">
+                                            <span class="font-semibold" x-text="device.anomaly_score.toFixed(2)"></span>
+                                            <span x-show="device.anomaly_score > 0.8" class="inline-block w-2.5 h-2.5 ml-1 rounded-full bg-red-400 animate-dot-glow" aria-label="High Anomaly"></span>
+                                        </td>
+                                        <td class="p-4 text-gray-300" x-text="device.persistence_score.toFixed(2)"></td>
+                                        <td class="p-4 text-gray-300" x-text="device.pattern_score.toFixed(2)"></td>
+                                        <td class="p-4" :class="device.deauth_count > 5 ? 'text-red-400' : 'text-gray-300'" x-text="device.deauth_count"></td>
+                                        <td class="p-4 whitespace-nowrap">
+                                            <button @click="selectedMac = mac" class="text-neon-green hover:text-green-400 transition-colors text-xs mr-2 border border-neon-green/50 hover:border-green-400/50 rounded-md py-1 px-2.5 transform hover:scale-105">Details</button>
+                                            <button @click="handleBan(mac)" class="text-neon-green hover:text-green-400 transition-colors text-xs border border-neon-green/50 hover:border-green-400/50 rounded-md py-1 px-2.5 transform hover:scale-105">Ban</button>
+                                        </td>
+                                    </tr>
+                                </template>
+                                <tr x-show="Object.keys(devices).length === 0" class="text-center text-gray-400"><td colspan="9" class="p-5">No devices detected yet or filters are too restrictive.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
 
                 <!-- Diagnostics Widget -->
-                <div x-show="widgets.includes('diagnostics')" class="bg-gray-800 rounded-lg shadow-lg p-4 widget" data-widget="diagnostics">
-                    <h2 class="text-2xl mb-4">ESP8266 Diagnostics</h2>
-                    <div class="grid grid-cols-2 gap-4">
-                        <div>
-                            <p><strong>Free Heap:</strong> <span x-text="diagnostics.free_heap || 'N/A'"></span> bytes</p>
-                            <canvas id="heap-gauge" width="100" height="100"></canvas>
+                <div x-show="widgets.includes('diagnostics')" class="bg-gray-800 rounded-xl shadow-2xl p-8 widget flex-grow w-full md:w-[calc(50%-1.5rem)] lg:w-[calc(50%-1.5rem)] border border-gray-700 widget-card" data-widget="diagnostics">
+                    <h2 class="text-3xl font-bold mb-6 text-gray-100 dark:text-gray-100 light:text-gray-900">ESP8266 Diagnostics</h2>
+                    <div class="grid grid-cols-2 gap-4 h-64 items-center justify-center">
+                        <div class="relative flex flex-col items-center justify-center h-full">
+                            <canvas id="heap-gauge" class="w-full h-full"></canvas>
+                            <div class="absolute text-center">
+                                <p class="text-xl font-bold text-gray-100 dark:text-gray-100 light:text-gray-900">Heap</p>
+                                <p class="text-sm text-gray-400"><span x-text="diagnostics.free_heap || 'N/A'"></span> bytes</p>
+                            </div>
                         </div>
-                        <div>
-                            <p><strong>Uptime:</strong> <span x-text="diagnostics.uptime ? diagnostics.uptime.toFixed(2) : 'N/A'"></span> seconds</p>
-                            <canvas id="uptime-gauge" width="100" height="100"></canvas>
+                        <div class="relative flex flex-col items-center justify-center h-full">
+                            <canvas id="uptime-gauge" class="w-full h-full"></canvas>
+                            <div class="absolute text-center">
+                                <p class="text-xl font-bold text-gray-100 dark:text-gray-100 light:text-gray-900">Uptime</p>
+                                <p class="text-sm text-gray-400"><span x-text="diagnostics.uptime ? formatUptime(diagnostics.uptime) : 'N/A'"></span></p>
+                            </div>
                         </div>
                     </div>
                 </div>
 
                 <!-- Charts -->
-                <div x-show="widgets.includes('signal')" class="bg-gray-800 rounded-lg shadow-lg p-4 widget" data-widget="signal">
-                    <h2 class="text-2xl mb-4">Signal Strength</h2>
-                    <canvas id="signal-chart"></canvas>
+                <div x-show="widgets.includes('signal')" class="bg-gray-800 rounded-xl shadow-2xl p-8 widget flex-grow w-full md:w-[calc(50%-1.5rem)] lg:w-[calc(50%-1.5rem)] border border-gray-700 widget-card" data-widget="signal">
+                    <h2 class="text-3xl font-bold mb-6 text-gray-100 dark:text-gray-100 light:text-gray-900">Signal Strength</h2>
+                    <canvas id="signal-chart" class="h-72"></canvas>
                 </div>
-                <div x-show="widgets.includes('ssid')" class="bg-gray-800 rounded-lg shadow-lg p-4 widget" data-widget="ssid">
-                    <h2 class="text-2xl mb-4">SSID Distribution</h2>
-                    <canvas id="ssid-chart"></canvas>
+                <div x-show="widgets.includes('ssid')" class="bg-gray-800 rounded-xl shadow-2xl p-8 widget flex-grow w-full md:w-[calc(50%-1.5rem)] lg:w-[calc(50%-1.5rem)] border border-gray-700 widget-card" data-widget="ssid">
+                    <h2 class="text-3xl font-bold mb-6 text-gray-100 dark:text-gray-100 light:text-gray-900">SSID Distribution</h2>
+                    <canvas id="ssid-chart" class="h-72"></canvas>
                 </div>
-                <div x-show="widgets.includes('persistence')" class="bg-gray-800 rounded-lg shadow-lg p-4 widget" data-widget="persistence">
-                    <h2 class="text-2xl mb-4">Persistence Timeline</h2>
-                    <canvas id="persistence-chart"></canvas>
+                <div x-show="widgets.includes('persistence')" class="bg-gray-800 rounded-xl shadow-2xl p-8 widget flex-grow w-full md:w-[calc(50%-1.5rem)] lg:w-[calc(50%-1.5rem)] border border-gray-700 widget-card" data-widget="persistence">
+                    <h2 class="text-3xl font-bold mb-6 text-gray-100 dark:text-gray-100 light:text-gray-900">Persistence Timeline</h2>
+                    <canvas id="persistence-chart" class="h-72"></canvas>
                 </div>
-                <div x-show="widgets.includes('channel')" class="bg-gray-800 rounded-lg shadow-lg p-4 widget" data-widget="channel">
-                    <h2 class="text-2xl mb-4">Channel Activity</h2>
-                    <canvas id="channel-chart"></canvas>
+                <div x-show="widgets.includes('channel')" class="bg-gray-800 rounded-xl shadow-2xl p-8 widget flex-grow w-full md:w-[calc(50%-1.5rem)] lg:w-[calc(50%-1.5rem)] border border-gray-700 widget-card" data-widget="channel">
+                    <h2 class="text-3xl font-bold mb-6 text-gray-100 dark:text-gray-100 light:text-gray-900">Channel Activity</h2>
+                    <canvas id="channel-chart" class="h-72"></canvas>
                 </div>
             </div>
 
             <!-- Device Details Modal -->
-            <div x-show="selectedMac" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" @keydown.escape="selectedMac = null">
-                <div class="bg-gray-800 p-6 rounded-lg max-w-lg w-full animate-fade-in">
-                    <h3 class="text-2xl mb-4">Device Details</h3>
-                    <p><strong>MAC:</strong> <span x-text="selectedMac"></span></p>
-                    <p><strong>Vendor:</strong> <span x-text="devices[selectedMac]?.vendor"></span></p>
-                    <p><strong>SSIDs:</strong> <span x-text="devices[selectedMac]?.ssid_list.join(', ')"></span></p>
-                    <p><strong>Anomaly Score:</strong> <span x-text="devices[selectedMac]?.anomaly_score.toFixed(2)"></span></p>
-                    <p><strong>Persistence:</strong> <span x-text="devices[selectedMac]?.persistence_score.toFixed(2)"></span></p>
-                    <p><strong>Pattern Score:</strong> <span x-text="devices[selectedMac]?.pattern_score.toFixed(2)"></span></p>
-                    <p><strong>Channels:</strong> <span x-text="Object.keys(devices[selectedMac]?.channel_counts || {}).join(', ')"></span></p>
-                    <button @click="selectedMac = null" class="bg-neon-green text-gray-900 px-4 py-2 mt-4 rounded hover:bg-green-400" aria-label="Close modal">Close</button>
+            <div x-show="selectedMac" class="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 p-6" @keydown.escape="selectedMac = null">
+                <div @click.away="selectedMac = null" class="bg-gray-800 rounded-xl shadow-3xl p-8 max-w-xl w-full animate-fade-in border border-neon-green/30">
+                    <h3 class="text-4xl font-bold mb-6 text-neon-green">Device Details</h3>
+                    <div class="space-y-4 text-gray-300 text-lg">
+                        <p><strong>MAC:</strong> <span class="font-semibold text-white" x-text="selectedMac"></span></p>
+                        <p><strong>Vendor:</strong> <span class="text-gray-200" x-text="devices[selectedMac]?.vendor || 'N/A'"></span></p>
+                        <p><strong>SSIDs:</strong> <span class="text-sm block max-h-32 overflow-y-auto mt-2 p-3 bg-gray-700 rounded-lg text-gray-200 leading-relaxed" x-text="devices[selectedMac]?.ssid_list.join('\n') || 'N/A'"></span></p>
+                        <p><strong>Anomaly Score:</strong> <span :class="devices[selectedMac]?.anomaly_score > 0.8 ? 'text-red-400 font-bold' : 'text-green-400 font-bold'" x-text="devices[selectedMac]?.anomaly_score.toFixed(2)"></span></p>
+                        <p><strong>Persistence:</strong> <span class="text-gray-200" x-text="devices[selectedMac]?.persistence_score.toFixed(2)"></span></p>
+                        <p><strong>Pattern Score:</strong> <span class="text-gray-200" x-text="devices[selectedMac]?.pattern_score.toFixed(2)"></span></p>
+                        <p><strong>Deauth Count:</strong> <span :class="devices[selectedMac]?.deauth_count > 5 ? 'text-red-400 font-bold' : 'text-gray-200'" x-text="devices[selectedMac]?.deauth_count"></span></p>
+                        <p><strong>Channels:</strong> <span class="text-gray-200" x-text="Object.keys(devices[selectedMac]?.channel_counts || {}).join(', ') || 'N/A'"></span></p>
+                    </div>
+                    <div class="flex justify-end mt-8">
+                        <button @click="selectedMac = null" class="bg-neon-green text-gray-900 font-bold px-8 py-3 rounded-lg hover:bg-green-400 focus:outline-none focus:ring-2 focus:ring-neon-green transition-all duration-200 transform hover:scale-105" aria-label="Close modal">Close</button>
+                    </div>
                 </div>
             </div>
 
-            <!-- Controls -->
-            <div class="fixed bottom-4 right-4 flex space-x-4">
-                <button @click="fetch('/export/csv?preset=high_risk').then(() => alert('Exported high-risk to CSV'))" class="bg-neon-green text-gray-900 px-4 py-2 rounded hover:bg-green-400" aria-label="Export high-risk CSV">High-Risk CSV</button>
-                <button @click="fetch('/export/json?preset=recent').then(() => alert('Exported recent to JSON'))" class="bg-neon-green text-gray-900 px-4 py-2 rounded hover:bg-green-400" aria-label="Export recent JSON">Recent JSON</button>
-                <button @click="fetch('/cleanup').then(res => res.json()).then(data => alert(data.status))" class="bg-neon-green text-gray-900 px-4 py-2 rounded hover:bg-green-400" aria-label="Cleanup logs">Cleanup</button>
+            <!-- Dashboard Controls -->
+            <div class="fixed bottom-8 right-8 flex flex-wrap space-x-4 space-y-4 md:space-y-0 z-40">
+                <button @click="handleExport('csv', 'high_risk')" class="bg-neon-green text-gray-900 font-bold px-6 py-3 rounded-full shadow-lg hover:bg-green-400 focus:outline-none focus:ring-2 focus:ring-neon-green transition-all duration-200 transform hover:scale-105">Export High-Risk CSV</button>
+                <button @click="handleExport('json', 'recent')" class="bg-neon-green text-gray-900 font-bold px-6 py-3 rounded-full shadow-lg hover:bg-green-400 focus:outline-none focus:ring-2 focus:ring-neon-green transition-all duration-200 transform hover:scale-105">Export Recent JSON</button>
+                <button @click="handleCleanup()" class="bg-neon-green text-gray-900 font-bold px-6 py-3 rounded-full shadow-lg hover:bg-green-400 focus:outline-none focus:ring-2 focus:ring-neon-green transition-all duration-200 transform hover:scale-105">Cleanup Logs</button>
+            </div>
+
+            <!-- Global Loading Overlay -->
+            <div x-show="isLoading" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[10000]">
+                <div class="flex flex-col items-center text-neon-green text-3xl font-bold">
+                    <div class="loader ease-linear rounded-full border-8 border-t-8 border-gray-200 h-20 w-20 mb-4" :class="theme === 'dark' ? 'border-gray-700 border-t-neon-green' : 'border-gray-300 border-t-neon-green'"></div>
+                    <span>Loading...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Tab -->
+        <div x-show="activeTab === 'settings'" x-data="{
+            espApSsid: '',
+            espApPassword: ''
+        }" x-init="
+            isLoading = true; // Set loading true when fetching settings
+            fetch('/esp-config')
+                .then(res => res.json())
+                .then(data => {
+                    espApSsid = data.ssid;
+                    espApPassword = data.password;
+                    isLoading = false; // Set loading false after fetching
+                })
+                .catch(error => {
+                    console.error('Error fetching ESP config:', error);
+                    $dispatch('toast', { message: 'Failed to fetch ESP config.', type: 'error' });
+                    isLoading = false; // Set loading false on error
+                });
+        ">
+            <h2 class="text-4xl font-bold mb-8 text-neon-green">Settings</h2>
+
+            <div class="bg-gray-800 rounded-xl shadow-2xl p-8 mb-6 border border-gray-700">
+                <h3 class="text-3xl font-bold mb-5 text-gray-100 dark:text-gray-100 light:text-gray-900">ESP8266 AP Settings</h3>
+                <p class="text-gray-300 mb-8">Configure the SSID and password for the SigVoid honeypot Wi-Fi access point running on the ESP8266. These settings will be saved to the ESP's EEPROM.</p>
+                
+                <form @submit.prevent="updateEspConfig(this)"> <!-- Pass 'this' context to updateEspConfig -->
+                    <div class="mb-6">
+                        <label for="esp-ssid" class="block text-gray-300 text-sm font-bold mb-2">AP SSID:</label>
+                        <input type="text" id="esp-ssid" x-model="espApSsid" class="shadow appearance-none border rounded-md w-full py-3.5 px-4 bg-gray-700 text-white leading-tight focus:outline-none focus:ring-2 focus:ring-neon-green transition-all duration-200 placeholder:text-gray-400" placeholder="e.g., FreePublicWiFi">
+                    </div>
+                    <div class="mb-10">
+                        <label for="esp-password" class="block text-gray-300 text-sm font-bold mb-2">AP Password (min 8 chars, leave blank for open):</label>
+                        <input type="password" id="esp-password" x-model="espApPassword" class="shadow appearance-none border rounded-md w-full py-3.5 px-4 bg-gray-700 text-white leading-tight focus:outline-none focus:ring-2 focus:ring-neon-green transition-all duration-200 placeholder:text-gray-400" placeholder="password">
+                    </div>
+                    <button type="submit" class="bg-neon-green text-gray-900 font-bold py-3.5 px-8 rounded-lg hover:bg-green-400 focus:outline-none focus:ring-2 focus:ring-neon-green transition-all duration-200 transform hover:scale-105" aria-label="Update ESP AP settings">Update ESP AP Settings</button>
+                </form>
             </div>
         </div>
     </div>
-    <script src="/static/dashboard.js"></script>
-</body>
-</html>   </div>
-        </div>
-    </div>
-    <script src="/static/dashboard.js"></script>
+    <!-- Script tag for dashboard.js -->
+    <script src="/frontend/static/dashboard.js"></script>
 </body>
 </html>

@@ -1,5 +1,3 @@
-#!/bin/bash
-
 # Colors for Cyberacore aesthetic
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -12,6 +10,7 @@ NC='\033[0m' # No Color
 CONFIG_FILE="sigvoid.conf"
 LOG_FILE="sigvoid.log"
 SERVER_LOG="server.log"
+ALERTS_LOG="alerts.log"
 
 # Default config values
 DEFAULT_PORT="/dev/ttyUSB0"
@@ -83,13 +82,13 @@ ${GREEN}
 █─█─█ █─█─█ █─█─█ █─█─█ █─█─█ █─█─█ 
 ██─██ ██─██ ██─██ ██─██ ██─██ ██─██ 
 █───█ █───█ █───█ █───█ █───█ █───█ 
-${CYAN}
+${CYYAN}
   SigVoid - Cyberacore Wi-Fi Threat Monitor
   Made BY AsHfIEXE
 ${NC}
 EOF"
 )
-eval "${BANNERS[$RANDOM % ${#BANNERS[@]}]}"
+eval "${BANNERS[$RANDOM % ${#BANNERS[@}]}"
 
 # Help function
 show_help() {
@@ -125,17 +124,15 @@ log INFO "Starting SigVoid at $(date)"
 # System diagnostics
 log INFO "Running system diagnostics"
 echo -e "${YELLOW}[*] System Diagnostics:${NC}"
-# Fix CPU usage parsing for cross-platform compatibility
-CPU_USAGE=$(top -bn1 | grep -E "Cpu(s)|%Cpu" | head -n 1 | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]/) {print $i; exit}}' | sed 's/[^0-9.]//g')
+CPU_USAGE=$(top -bn1 | grep -E "Cpu\(s\)|%Cpu" | awk '{print $2}' | head -n 1 | sed 's/[^0-9.]//g')
 echo -e "  CPU Usage: ${CPU_USAGE:-N/A}%"
 echo -e "  Memory Free: $(free -h | grep Mem | awk '{print $4}')"
 echo -e "  Disk Free: $(df -h . | tail -n 1 | awk '{print $4}')"
-# Enhanced network check with fallback
-NETWORK_STATUS=$(ping -c 1 8.8.8.8 >/dev/null 2>&1 && echo 'Online' || echo 'Offline')
+NETWORK_STATUS=$(ping -c 1 -W 1 8.8.8.8 >/dev/null 2>&1 && echo 'Online' || echo 'Offline')
 if [ "$NETWORK_STATUS" = "Offline" ]; then
     log WARN "Network is offline"
     echo -e "  Network: Offline"
-    echo -e "${YELLOW}[!] Network offline. Proceed without asset downloads? (y/n):${NC}"
+    echo -e "${YELLOW}[!] Network offline. Asset downloads may fail. Proceed? (y/n):${NC}"
     read -n 1 choice
     echo
     if [ "$choice" != "y" ]; then
@@ -147,6 +144,11 @@ else
     log INFO "Network is online"
     echo -e "  Network: Online"
 fi
+
+# Create necessary directories
+mkdir -p backend/database
+mkdir -p frontend/static
+mkdir -p frontend/templates
 
 # Install system dependencies
 log INFO "Checking system dependencies"
@@ -180,7 +182,9 @@ fi
 # Install Python dependencies
 log INFO "Checking Python dependencies"
 echo -e "${YELLOW}[*] Checking Python dependencies...${NC}"
-pip install --quiet fastapi uvicorn pyserial aiohttp pandas &
+# Use backend/requirements.txt for clarity if this grows.
+# For now, listing directly. Removed pandas.
+pip install --quiet fastapi uvicorn pyserial aiohttp aiosqlite python-socketio python-engineio &
 progress_bar 5
 if [ $? -eq 0 ]; then
     log INFO "Python dependencies installed"
@@ -191,64 +195,107 @@ else
     exit 1
 fi
 
+# Download OUI database if not present
+OUI_DB_PATH="backend/database/oui.db"
+if [ ! -f "$OUI_DB_PATH" ]; then
+    log INFO "OUI database not found, downloading"
+    echo -e "${YELLOW}[*] Downloading OUI database...${NC}"
+    if [ "$NETWORK_STATUS" = "Online" ]; then
+        curl -s -o /tmp/oui.txt "https://standards-oui.ieee.org/oui/oui.txt"
+        if [ $? -eq 0 ]; then
+            log INFO "Parsing OUI data to SQLite"
+            python3 - <<EOF
+import sqlite3
+import re
+import os
+
+db_path = "$OUI_DB_PATH"
+os.makedirs(os.path.dirname(db_path), exist_ok=True)
+conn = sqlite3.connect(db_path)
+cursor = conn.cursor()
+cursor.execute("CREATE TABLE IF NOT EXISTS oui (oui TEXT PRIMARY KEY, vendor TEXT)")
+
+with open("/tmp/oui.txt", "r", encoding="utf-8") as f:
+    for line in f:
+        match = re.match(r'([0-9A-F]{2}-[0-9A-F]{2}-[0-9A-F]{2})\s+\(hex\)\s+(.*)', line)
+        if match:
+            oui = match.group(1).replace('-', '').upper()
+            vendor = match.group(2).strip()
+            cursor.execute("INSERT OR IGNORE INTO oui (oui, vendor) VALUES (?, ?)", (oui, vendor))
+conn.commit()
+conn.close()
+os.remove("/tmp/oui.txt")
+print("OUI database created successfully.")
+EOF
+            if [ $? -eq 0 ]; then
+                log INFO "OUI database created"
+                echo -e "${GREEN}[+] OUI database created.${NC}"
+            else
+                log ERROR "Failed to create OUI database"
+                echo -e "${RED}[-] Failed to create OUI database.${NC}"
+            fi
+        else
+            log ERROR "Failed to download oui.txt"
+            echo -e "${RED}[-] Failed to download oui.txt. Vendor lookups will be 'Unknown'.${NC}"
+        fi
+    else
+        log WARN "Skipping OUI database download due to offline network."
+        echo -e "${YELLOW}[!] Skipping OUI database download due to offline network. Vendor lookups will be 'Unknown'.${NC}"
+    fi
+else
+    log INFO "OUI database found"
+    echo -e "${GREEN}[+] OUI database found.${NC}"
+fi
+
 # Auto-detect ESP8266 port
 log INFO "Detecting ESP8266 port"
 echo -e "${YELLOW}[*] Detecting ESP8266 port...${NC}"
+DETECTED_PORT=""
 if [ -z "$ESP_PORT" ] || [ ! -e "$ESP_PORT" ]; then
     for p in /dev/ttyUSB* /dev/ttyACM*; do
         if [ -e "$p" ]; then
-            ESP_PORT="$p"
+            DETECTED_PORT="$p"
             break
         fi
     done
+    if [ -z "$DETECTED_PORT" ]; then
+        log WARN "No ESP8266 port found, retrying"
+        echo -e "${YELLOW}[*] No ESP8266 port found. Retrying in 5 seconds...${NC}"
+        sleep 5
+        for p in /dev/ttyUSB* /dev/ttyACM*; do
+            if [ -e "$p" ]; then
+                DETECTED_PORT="$p"
+                break
+            fi
+        done
+    fi
+    ESP_PORT="${DETECTED_PORT:-$DEFAULT_PORT}" # Use detected or default if none found
 fi
 
-# Retry logic with interactive prompt
-if [ -z "$ESP_PORT" ] || [ ! -e "$ESP_PORT" ]; then
-    log WARN "No ESP8266 port found, retrying"
-    echo -e "${YELLOW}[*] No ESP8266 port found. Retrying in 5 seconds...${NC}"
-    sleep 5
-    for p in /dev/ttyUSB* /dev/ttyACM*; do
-        if [ -e "$p" ]; then
-            ESP_PORT="$p"
-            break
-        fi
-    done
-    if [ -z "$ESP_PORT" ] || [ ! -e "$ESP_PORT" ]; then
-        log ERROR "No ESP8266 port found"
-        echo -e "${RED}[-] No ESP8266 port found. Available ports:${NC}"
-        ls /dev/tty* 2>/dev/null || echo "None"
-        read -p "Enter port (e.g., /dev/ttyUSB0) or press Enter to exit: " user_port
-        if [ -n "$user_port" ] && [ -e "$user_port" ]; then
-            ESP_PORT="$user_port"
-        else
-            log ERROR "User aborted or invalid port"
-            echo -e "${RED}[-] Exiting. Connect ESP8266 and retry.${NC}"
-            exit 1
-        fi
+if [ ! -e "$ESP_PORT" ]; then
+    log ERROR "No ESP8266 port found at $ESP_PORT"
+    echo -e "${RED}[-] No ESP8266 port found at $ESP_PORT. Available ports:${NC}"
+    ls /dev/tty* 2>/dev/null || echo "None"
+    read -p "Enter port (e.g., /dev/ttyUSB0) or press Enter to exit: " user_port
+    if [ -n "$user_port" ] && [ -e "$user_port" ]; then
+        ESP_PORT="$user_port"
+    else
+        log ERROR "User aborted or invalid port"
+        echo -e "${RED}[-] Exiting. Connect ESP8266 and retry.${NC}"
+        exit 1
     fi
 fi
 log INFO "ESP8266 detected at $ESP_PORT"
 echo -e "${GREEN}[+] ESP8266 detected at $ESP_PORT.${NC}"
 
-# Validate ESP8266 firmware
-log INFO "Validating ESP8266 firmware"
-echo -e "${YELLOW}[*] Validating ESP8266 firmware...${NC}"
-for baud in $ESP_BAUD 57600 9600; do
-    stty -F "$ESP_PORT" $baud >/dev/null 2>&1
-    timeout 3 cat "$ESP_PORT" | grep -q '{"type":"diagnostics"' && break
-done
-if [ $? -eq 0 ]; then
-    log INFO "ESP8266 firmware validated"
-    echo -e "${GREEN}[+] ESP8266 firmware validated.${NC}"
-else
-    log WARN "ESP8266 firmware not responding"
-    echo -e "${YELLOW}[!] Warning: ESP8266 not responding. Flash rogue_ap.ino and retry.${NC}"
-fi
+# Set serial port in backend config
+# This needs to be done via Python to update the _port_config in serial_reader.py
+python3 -c "from backend.serial_reader import set_serial_config; set_serial_config('$ESP_PORT', $ESP_BAUD)"
 
 # Check audio alert
 log INFO "Checking audio alert"
 echo -e "${YELLOW}[*] Checking audio alert...${NC}"
+if [ ! -f "$ALERTS_LOG" ]; then touch "$ALERTS_LOG"; fi # Ensure alerts.log exists
 if [ ! -f "alert.wav" ]; then
     log WARN "alert.wav not found"
     if [ "$NETWORK_STATUS" = "Online" ]; then
@@ -256,7 +303,7 @@ if [ ! -f "alert.wav" ]; then
         read -n 1 choice
         echo
         if [ "$choice" = "y" ]; then
-            curl -s -o alert.wav https://freesound.org/data/previews/254/254774_4590445-lq.wav
+            curl -s -o alert.wav "https://cdn.freesound.org/previews/254/254774_4590445-lq.mp3"
             if [ $? -eq 0 ]; then
                 log INFO "alert.wav downloaded"
                 echo -e "${GREEN}[+] alert.wav downloaded.${NC}"
@@ -277,81 +324,57 @@ else
     echo -e "${GREEN}[+] Audio alert file found.${NC}"
 fi
 
-# Check PWA icon
-log INFO "Checking PWA icon"
-echo -e "${YELLOW}[*] Checking PWA icon...${NC}"
-if [ ! -f "frontend/static/icon.png" ]; then
-    log WARN "icon.png not found"
-    echo -e "${YELLOW}[!] Warning: icon.png not found. PWA icon missing.${NC}"
-else
-    log INFO "PWA icon found"
-    echo -e "${GREEN}[+] PWA icon found.${NC}"
-fi
-
-# Check frontend assets in parallel
-log INFO "Checking frontend assets"
-echo -e "${YELLOW}[*] Checking frontend assets...${NC}"
+# Check PWA icon and frontend assets
+log INFO "Checking PWA icon and frontend assets"
+echo -e "${YELLOW}[*] Checking PWA icon and frontend assets...${NC}"
 ASSETS=(
     "chart.min.js:https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.min.js"
     "alpine.min.js:https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"
     "socket.io.min.js:https://cdn.jsdelivr.net/npm/socket.io-client@4.7.5/dist/socket.io.min.js"
     "interact.min.js:https://cdn.jsdelivr.net/npm/interactjs@1.10.11/dist/interact.min.js"
+    "icon.png:https://via.placeholder.com/192" # Placeholder for icon if not provided
 )
 pids=()
-if [ "$NETWORK_STATUS" = "Online" ]; then
-    for asset in "${ASSETS[@]}"; do
-        IFS=':' read -r file url <<< "$asset"
-        if [ ! -f "frontend/static/$file" ]; then
-            log DEBUG "Downloading $file"
-            echo -e "${YELLOW}[*] Downloading $file...${NC}"
+for asset in "${ASSETS[@]}"; do
+    IFS=':' read -r file url <<< "$asset"
+    if [ ! -f "frontend/static/$file" ]; then
+        log DEBUG "Downloading $file"
+        echo -e "${YELLOW}[*] Downloading $file...${NC}"
+        if [ "$NETWORK_STATUS" = "Online" ]; then
             curl -s -o "frontend/static/$file" "$url" &
             pids+=($!)
         else
-            log INFO "$file found"
-            echo -e "${GREEN}[+] $file found.${NC}"
-        fi
-    done
-    for pid in "${pids[@]}"; do
-        wait $pid
-        if [ $? -eq 0 ]; then
-            log INFO "Asset download completed"
-        else
-            log WARN "Failed to download an asset"
-            echo -e "${YELLOW}[!] Failed to download an asset. PWA functionality may be limited.${NC}"
-        fi
-    done
-else
-    log WARN "Skipping asset downloads due to offline network"
-    echo -e "${YELLOW}[!] Skipping asset downloads due to offline network.${NC}"
-    for asset in "${ASSETS[@]}"; do
-        IFS=':' read -r file url <<< "$asset"
-        if [ ! -f "frontend/static/$file" ]; then
             log ERROR "$file missing and cannot download offline"
             echo -e "${RED}[-] $file missing. PWA functionality disabled. Download manually or connect to network.${NC}"
             exit 1
         fi
-    done
-fi
+    else
+        log INFO "$file found"
+        echo -e "${GREEN}[+] $file found.${NC}"
+    fi
+done
+for pid in "${pids[@]}"; do
+    wait $pid
+    if [ $? -eq 0 ]; then
+        log INFO "Asset download completed"
+    else
+        log WARN "Failed to download an asset"
+        echo -e "${YELLOW}[!] Failed to download an asset. PWA functionality may be limited.${NC}"
+    fi
+done
 
 # Check TailwindCSS build
 log INFO "Checking TailwindCSS build"
 echo -e "${YELLOW}[*] Checking TailwindCSS build...${NC}"
-if [ ! -f "frontend/static/styles.css" ]; then
-    log INFO "Building TailwindCSS"
-    echo -e "${YELLOW}[*] Building TailwindCSS...${NC}"
-    npx tailwindcss -i input.css -o frontend/static/styles.css --minify &
-    progress_bar 3
-    if [ $? -eq 0 ]; then
-        log INFO "TailwindCSS built successfully"
-        echo -e "${GREEN}[+] TailwindCSS built successfully.${NC}"
-    else
-        log ERROR "Failed to build TailwindCSS"
-        echo -e "${RED}[-] Failed to build TailwindCSS. Install Node.js and run 'npm install tailwindcss'.${NC}"
-        exit 1
-    fi
+npx tailwindcss -i frontend/static/input.css -o frontend/static/styles.css --minify &
+progress_bar 3
+if [ $? -eq 0 ]; then
+    log INFO "TailwindCSS built successfully"
+    echo -e "${GREEN}[+] TailwindCSS built successfully.${NC}"
 else
-    log INFO "TailwindCSS styles found"
-    echo -e "${GREEN}[+] TailwindCSS styles found.${NC}"
+    log ERROR "Failed to build TailwindCSS"
+    echo -e "${RED}[-] Failed to build TailwindCSS. Ensure Node.js and npm are installed and 'npm install tailwindcss' was run.${NC}"
+    exit 1
 fi
 
 # Rotate logs
@@ -360,20 +383,21 @@ if [ -f "$SERVER_LOG" ]; then
     mv "$SERVER_LOG" "${SERVER_LOG}.$(date +%F_%T)"
     log INFO "Server log rotated"
 fi
-if [ -f "alerts.log" ] && [ $(stat -c %s alerts.log) -gt 1048576 ]; then
-    mv alerts.log "alerts.log.$(date +%F_%T)"
+if [ -f "$ALERTS_LOG" ] && [ $(stat -c %s "$ALERTS_LOG") -gt 1048576 ]; then
+    mv "$ALERTS_LOG" "${ALERTS_LOG}.$(date +%F_%T)"
     log INFO "Alerts log rotated"
 fi
 
 # Start FastAPI server
 log INFO "Starting SigVoid server"
 echo -e "${YELLOW}[*] Starting SigVoid server...${NC}"
+# Use --app backend.main for modular project structure
 timeout 10s uvicorn backend.main:app --host 0.0.0.0 --port "$SERVER_PORT" > "$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 sleep 2
 if ps -p $SERVER_PID > /dev/null; then
     log INFO "SigVoid running at http://localhost:$SERVER_PORT"
-    echo -e "${GREEN}[+] SigVoid running at http://localhost:$SERVER_PORT${NC}"
+    echo -e "${GREEN}[+] SigVoid dashboard available at http://localhost:$SERVER_PORT${NC}"
     echo -e "${CYAN}[i] Press Ctrl+C to stop the server gracefully.${NC}"
 else
     log ERROR "Failed to start server"
@@ -383,7 +407,99 @@ else
 fi
 
 # Trap Ctrl+C for graceful shutdown
-trap 'log INFO "Stopping server"; echo -e "${YELLOW}[*] Stopping server...${NC}"; kill $SERVER_PID; wait $SERVER_PID 2>/dev/null; echo -e "${GREEN}[+] Server stopped.${NC}"; exit 0' INT
+trap 'log INFO "Stopping server"; echo -e "\n${YELLOW}[*] Stopping server...${NC}"; kill $SERVER_PID; wait $SERVER_PID 2>/dev/null; echo -e "${GREEN}[+] Server stopped.${NC}"; exit 0' INT
 
 # Keep script running
 wait
+
+```
+
+### 13. `manifest.json`
+
+```json
+{
+    "name": "SigVoid",
+    "short_name": "SigVoid",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#111827",
+    "theme_color": "#39ff14",
+    "icons": [
+        {
+            "src": "/static/icon.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "/static/icon.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        }
+    ],
+    "permissions": ["notifications"]
+}
+```
+
+### 14. `sw.js`
+
+```javascript
+// sw.js
+const CACHE_NAME = 'sigvoid-cache-v1'; // Renamed cache
+const urlsToCache = [
+    '/',
+    '/static/styles.css',
+    '/static/dashboard.js',
+    '/static/chart.min.js',
+    '/static/alpine.min.js',
+    '/static/socket.io.min.js',
+    '/static/interact.min.js',
+    '/static/icon.png'
+];
+
+self.addEventListener('install', event => {
+    event.waitUntil(
+        caches.open(CACHE_NAME).then(cache => {
+            console.log('Opened cache');
+            return cache.addAll(urlsToCache);
+        })
+    );
+});
+
+self.addEventListener('fetch', event => {
+    event.respondWith(
+        caches.match(event.request).then(response => {
+            // Cache hit - return response
+            if (response) {
+                return response;
+            }
+            return fetch(event.request).catch(error => {
+                console.error('Fetch failed:', error);
+                // Optionally return a fallback page for offline
+                // return caches.match('/offline.html');
+            });
+        })
+    );
+});
+
+self.addEventListener('push', event => {
+    const data = event.data.json();
+    self.registration.showNotification(data.title, {
+        body: data.body,
+        icon: '/static/icon.png'
+    });
+});
+
+self.addEventListener('activate', event => {
+    // Delete old caches
+    event.waitUntil(
+        caches.keys().then(cacheNames => {
+            return Promise.all(
+                cacheNames.filter(cacheName => {
+                    return cacheName !== CACHE_NAME;
+                }).map(cacheName => {
+                    return caches.delete(cacheName);
+                })
+            );
+        })
+    );
+});

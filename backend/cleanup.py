@@ -1,29 +1,27 @@
-import sqlite3
-import os
 import time
 from typing import Dict
+from backend.database.database import get_db_connection
 
 async def cleanup_logs(max_age_hours: int = 24) -> Dict:
     try:
         cutoff = time.time() - max_age_hours * 3600
-        conn = sqlite3.connect("database/oui.db")
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM logs WHERE timestamp < ?", (cutoff,))
-        deleted = cursor.rowcount
-        conn.commit()
-        conn.close()
-        return {"status": f"Deleted {deleted} old log entries"}
-    except sqlite3.Error as e:
+        async with await get_db_connection() as db:
+            cursor = await db.execute("DELETE FROM logs WHERE timestamp < ?", (cutoff,))
+            deleted_logs = cursor.rowcount
+            await db.execute("DELETE FROM devices WHERE substr(timestamps, 2, instr(timestamps, ',') - 2) < ?", (cutoff,))
+            deleted_devices = cursor.rowcount # This heuristic needs refinement for devices
+            await db.commit()
+        return {"status": f"Deleted {deleted_logs} old log entries and {deleted_devices} inactive devices."}
+    except Exception as e:
         return {"error": f"Cleanup failed: {e}"}
 
 async def prune_blacklist(max_age_days: int = 7) -> Dict:
     try:
         cutoff = time.time() - max_age_days * 86400
-        with open("banned_macs.txt", "r") as f:
-            lines = [(line.strip(), cutoff) for line in f if line.strip()]
-        with open("banned_macs.txt", "w") as f:
-            for mac, _ in lines:
-                f.write(f"{mac}\n")
-        return {"status": f"Pruned blacklist"}
+        async with await get_db_connection() as db:
+            cursor = await db.execute("DELETE FROM banned_macs WHERE banned_at < ?", (cutoff,))
+            deleted = cursor.rowcount
+            await db.commit()
+        return {"status": f"Pruned {deleted} old entries from blacklist."}
     except Exception as e:
         return {"error": f"Blacklist prune failed: {e}"}
