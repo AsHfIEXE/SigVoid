@@ -1,3 +1,4 @@
+// rogue_ap.ino
 #include <ESP8266WiFi.h>
 #include <EEPROM.h>
 #include "esp_wifi.h"
@@ -5,12 +6,14 @@
 // EEPROM addresses for settings
 #define SSID_ADDR 0
 #define PASS_ADDR 33 // Max SSID length 32 + 1 for null terminator
-#define SETTINGS_FLAG_ADDR 96 // To check if settings are saved
+// Max password length 64 + 1 for null terminator. EEPROM.begin(128) should be enough.
+// SETTINGS_FLAG_ADDR is implicitly handled by checking if SSID[0] is 0xFF
 
 const int ledPin = D4; // Onboard LED for alerts (usually GPIO2 on NodeMCU)
 uint8_t busyChannels[3] = {1, 6, 11}; // Dynamic channel selection
 int channelProbes[13] = {0}; // Track probe counts per channel
 
+// Use non-const char arrays so they can be modified
 char apSSID[33] = "SigVoid_Honeypot"; // Default SSID
 char apPassword[65] = "";            // Default Password (empty for open)
 
@@ -20,7 +23,9 @@ void setup() {
   Serial.begin(115200);
   delay(500);
 
-  EEPROM.begin(512); // Initialize EEPROM with size 512 bytes
+  // Initialize EEPROM with enough space for SSID and Password
+  // SSID (33 bytes) + PASS (65 bytes) = 98 bytes. Let's use 128 bytes for margin.
+  EEPROM.begin(128); 
 
   // Load settings from EEPROM
   loadSettings();
@@ -29,7 +34,7 @@ void setup() {
   WiFi.mode(WIFI_AP_STA);
   // Ensure softAP starts with current loaded settings
   if (!WiFi.softAP(apSSID, apPassword)) {
-    Serial.println("{\"error\":\"AP setup failed, restarting ESP\"}");
+    Serial.println("{\"type\":\"error\",\"message\":\"AP setup failed, restarting ESP\"}");
     delay(100);
     ESP.restart(); // Restart if AP setup fails
   } else {
@@ -148,7 +153,7 @@ void handleSerialCommands() {
       if (newSSID.length() <= 32) {
         newSSID.toCharArray(apSSID, sizeof(apSSID));
         saveSettings();
-        applyAPSettings();
+        applyAPSettings(); // Apply new settings immediately
         Serial.printf("{\"type\":\"info\",\"message\":\"AP SSID set to '%s'\"}\n", apSSID);
       } else {
         Serial.println("{\"type\":\"error\",\"message\":\"SSID too long (max 32 chars)\"}");
@@ -158,7 +163,7 @@ void handleSerialCommands() {
       if (newPass.length() <= 64) {
         newPass.toCharArray(apPassword, sizeof(apPassword));
         saveSettings();
-        applyAPSettings();
+        applyAPSettings(); // Apply new settings immediately
         Serial.printf("{\"type\":\"info\",\"message\":\"AP password updated\"}\n");
       } else {
         Serial.println("{\"type\":\"error\",\"message\":\"Password too long (max 64 chars)\"}");
@@ -171,15 +176,19 @@ void handleSerialCommands() {
 }
 
 void loadSettings() {
-  EEPROM.get(SETTINGS_FLAG_ADDR, apSSID[0]); // Check first byte of SSID as a flag
-  if (apSSID[0] == 0xFF) { // If EEPROM is erased (all FF), use defaults
+  char temp_ssid_char;
+  EEPROM.get(SSID_ADDR, temp_ssid_char); // Read first char of SSID to check if EEPROM is initialized
+
+  if (temp_ssid_char == 0xFF) { // If EEPROM is erased (all FF), use defaults
     Serial.println("{\"type\":\"info\",\"message\":\"No saved AP settings found, using defaults.\"}");
     // Defaults are already set at global variable declaration
-    // Ensure the flag is set to a non-FF value to indicate settings are now 'saved' (even if defaults)
-    saveSettings(); 
+    saveSettings(); // Save defaults so they exist in EEPROM
   } else {
     EEPROM.get(SSID_ADDR, apSSID);
     EEPROM.get(PASS_ADDR, apPassword);
+    // Ensure null termination in case of partial writes/reads
+    apSSID[sizeof(apSSID) - 1] = '\0';
+    apPassword[sizeof(apPassword) - 1] = '\0';
     Serial.println("{\"type\":\"info\",\"message\":\"Loaded AP settings from EEPROM.\"}");
   }
 }
@@ -196,7 +205,7 @@ void applyAPSettings() {
   WiFi.softAPdisconnect(true); // Disconnect existing AP
   delay(100);
   if (!WiFi.softAP(apSSID, apPassword)) {
-    Serial.println("{\"error\":\"Failed to re-apply AP settings, restarting ESP\"}");
+    Serial.println("{\"type\":\"error\",\"message\":\"Failed to re-apply AP settings, restarting ESP\"}");
     delay(100);
     ESP.restart();
   }
