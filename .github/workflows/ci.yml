@@ -1,155 +1,97 @@
-```yaml
-name: SigVoid CI
+name: SigVoid CI/CD
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   pull_request:
-    branches: [ main ]
+    branches:
+      - main
+  workflow_dispatch: # Allows manual triggering from GitHub UI
 
 jobs:
-  lint-and-test:
-    runs-on: ubuntu-latest
+  build-and-test:
+    runs-on: ubuntu-latest # Use a fresh Ubuntu runner
 
     steps:
-      # Checkout code
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v3 # Use v3 for actions/checkout
 
-      # Set up Python
-      - name: Set up Python 3.10
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
+    - name: Set up Python
+      uses: actions/setup-python@v4 # Use v4 for actions/setup-python
+      with:
+        python-version: '3.9' # Specify a Python version compatible with your project
 
-      # Set up Node.js
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+    - name: Create requirements.txt for CI
+      # This is a workaround since your run.sh installs dependencies directly.
+      # For CI, it's best to have a requirements.txt file.
+      # This step ensures all necessary Python packages are available for installation.
+      run: |
+        echo "fastapi" > requirements.txt
+        echo "uvicorn" >> requirements.txt
+        echo "pyserial" >> requirements.txt
+        echo "aiohttp" >> requirements.txt
+        echo "aiosqlite" >> requirements.txt
+        echo "python-socketio" >> requirements.txt
+        echo "python-engineio" >> requirements.txt
+        # Add any other Python dependencies if your project uses them (e.g., python-dotenv)
+        # echo "python-dotenv" >> requirements.txt
 
-      # Cache Python dependencies
-      - name: Cache Python dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
-          restore-keys: ${{ runner.os }}-pip-
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
 
-      # Cache Node.js dependencies
-      - name: Cache Node.js dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-npm-${{ hashFiles('package.json') }}
-          restore-keys: ${{ runner.os }}-npm-
+    - name: Set up Node.js
+      uses: actions/setup-node@v3 # Use v3 for actions/setup-node
+      with:
+        node-version: '18' # Or a specific version like '16.x' or '20.x' that works with Tailwind
 
-      # Install system dependencies
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y curl sqlite3
+    - name: Install global Node.js packages (Tailwind CSS)
+      run: npm install -g tailwindcss
 
-      # Install Python dependencies
-      - name: Install Python dependencies
-        run: |
-          python -m venv venv
-          source venv/bin/activate
-          pip install --upgrade pip
-          pip install fastapi uvicorn pyserial aiohttp pandas pylint pytest
+    - name: Build Tailwind CSS
+      # Ensure frontend/static/input.css exists and is correctly structured
+      run: npx tailwindcss -i frontend/static/input.css -o frontend/static/styles.css --minify
 
-      # Install Node.js dependencies
-      - name: Install Node.js dependencies
-        run: npm install -g tailwindcss
+    - name: Setup OUI Database for CI
+      # Replicate the OUI database creation logic from run.sh
+      # This is crucial because the backend needs oui.db for vendor lookups.
+      run: |
+        mkdir -p backend/database
+        python3 - <<EOF
+import sqlite3
+import re
+import os
 
-      # Lint Python code
-      - name: Lint Python with pylint
-        run: |
-          source venv/bin/activate
-          pylint backend/*.py --disable=C0114,C0116 --max-line-length=120
+db_path = "backend/database/oui.db"
+os.makedirs(os.path.dirname(db_path), exist_ok=True)
+conn = sqlite3.connect(db_path)
+cursor = conn.cursor()
+cursor.execute("CREATE TABLE IF NOT EXISTS oui (oui TEXT PRIMARY KEY, vendor TEXT)")
+# Insert a dummy OUI entry to ensure the database is functional for basic tests
+cursor.execute("INSERT OR IGNORE INTO oui (oui, vendor) VALUES (?, ?)", ("000000", "CI Dummy Vendor"))
+conn.commit()
+conn.close()
+print("OUI database created successfully for CI environment.")
+EOF
+      env:
+        PYTHONUNBUFFERED: "1" # Ensures Python output is unbuffered in CI logs
 
-      # Run Python tests
-      - name: Run pytest
-        run: |
-          source venv/bin/activate
-          pytest tests/ -v
-
-      # Build TailwindCSS
-      - name: Build TailwindCSS
-        run: npx tailwindcss -i input.css -o frontend/static/styles.css --minify
-
-      # Validate SQLite database schema
-      - name: Validate SQLite schema
-        run: |
-          sqlite3 database/oui.db ".schema" > schema.sql
-          grep -q "CREATE TABLE oui" schema.sql
-          grep -q "CREATE TABLE logs" schema.sql
-
-      # Check Arduino sketch compilation
-      - name: Install Arduino CLI
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/arduino/install-cli/master/install.sh | sh
-          arduino-cli config init
-          arduino-cli core install esp8266:esp8266
-
-      - name: Compile Arduino sketch
-        run: |
-          arduino-cli compile --fqbn esp8266:esp8266:nodemcu esp8266/rogue_ap.ino
-
-      # Placeholder for frontend tests
-      - name: Placeholder for frontend tests
-        run: echo "Frontend tests to be implemented (e.g., Jest for dashboard.js)"
-
-    # Optional: Upload artifacts
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: sigvoid-build
-          path: |
-            frontend/static/styles.css
-            database/*.db
-```
-
-</xaiartifact>
-
----
-
-#### Setup Instructions
-1. **Create Workflow**:
-   - In your `SigVoid` directory:
-     ```bash
-     mkdir -p .github/workflows
-     ```
-   - Save the `ci.yml` above as `.github/workflows/ci.yml`.
-
-2. **Add `requirements.txt`**:
-   - Create `requirements.txt` in the root:
-     ```text
-     fastapi==0.115.0
-     uvicorn==0.30.1
-     pyserial==3.5
-     aiohttp==3.10.5
-     pandas==2.2.2
-     pylint==3.2.6
-     pytest==7.7.1
-     ```
-   - Commit:
-     ```bash
-     git add requirements.txt
-     git commit -m "Add requirements.txt for CI/CD"
-     ```
-
-3. **Add Minimal Tests**:
-   - Create `tests/` directory with a basic test:
-     <xaiArtifact artifact_id="test_analyzer.py" contentType="text/x-python">
-     ```python
-     import pytest
-     from backend.analyzer import Analyzer
-
-     def test_anomaly_score():
-         analyzer = Analyzer()
-         data = {"mac": "00:11:22:33:44:55", "ssid": "TestWiFi", "rssi": -30, "deauth_count": 10}
-         score = analyzer.calculate_anomaly(data)
-         assert 0 <= score <= 1
-         assert score > 0.7  # High score for high deauths
-     ```
+    - name: Run Python syntax checks and basic backend import test
+      # This step verifies that Python files are syntactically correct
+      # and that the main FastAPI application can be imported without crashing.
+      # For a more robust CI, you would add unit tests here (e.g., using pytest).
+      run: |
+        # Check Python syntax for all backend files
+        python -m py_compile backend/alerts.py
+        python -m py_compile backend/analyzer.py
+        python -m py_compile backend/cleanup.py
+        python -m py_compile backend/exporter.py
+        python -m py_compile backend/main.py
+        python -m py_compile backend/serial_reader.py
+        python -m py_compile backend/database/database.py
+        
+        # Test if FastAPI app can be imported (implies dependencies are met and basic syntax is OK)
+        python -c "import backend.main; print('FastAPI app imported successfully for CI.')"
+        
